@@ -38,6 +38,7 @@
       <div class="row">
         <button id="btnStart">Start</button>
         <button id="btnStop" disabled>Stop</button>
+        <label class="mini" style="margin-left:12px"><input id="showLabels" type="checkbox" checked/> Show labels</label>
       </div>
     </header>
 
@@ -107,7 +108,7 @@
   </div>
 
   <script>
-    const els={chart:document.getElementById('chart'),btnStart:document.getElementById('btnStart'),btnStop:document.getElementById('btnStop'),btnExport:document.getElementById('btnExport'),btnClear:document.getElementById('btnClear'),intervalSecs:document.getElementById('intervalSecs'),timeout:document.getElementById('timeout'),maxPoints:document.getElementById('maxPoints'),autostart:document.getElementById('autostart'),source:document.getElementById('source'),customRow:document.getElementById('customRow'),customUrl:document.getElementById('customUrl'),statusDot:document.getElementById('statusDot'),statusText:document.getElementById('statusText'),statLatest:document.getElementById('statLatest'),statAvg:document.getElementById('statAvg'),statMax:document.getElementById('statMax'),statCount:document.getElementById('statCount'),tbody:document.querySelector('#table tbody')};
+    const els={chart:document.getElementById('chart'),btnStart:document.getElementById('btnStart'),btnStop:document.getElementById('btnStop'),btnExport:document.getElementById('btnExport'),btnClear:document.getElementById('btnClear'),intervalSecs:document.getElementById('intervalSecs'),timeout:document.getElementById('timeout'),maxPoints:document.getElementById('maxPoints'),autostart:document.getElementById('autostart'),showLabels:document.getElementById('showLabels'),source:document.getElementById('source'),customRow:document.getElementById('customRow'),customUrl:document.getElementById('customUrl'),statusDot:document.getElementById('statusDot'),statusText:document.getElementById('statusText'),statLatest:document.getElementById('statLatest'),statAvg:document.getElementById('statAvg'),statMax:document.getElementById('statMax'),statCount:document.getElementById('statCount'),tbody:document.querySelector('#table tbody')};
 
     const STORAGE_KEY='SPEED_DATA_V3';
     const SETTINGS_KEY='SPEED_SETTINGS_V3';
@@ -141,7 +142,7 @@
       if(scheduleId) clearInterval(scheduleId);
       scheduleId=setInterval(()=>{ if(!testing) runTest(); }, secs*1000);
       nextAt=Date.now()+secs*1000;
-      saveSettings({intervalSecs:secs,timeout:parseInt(els.timeout.value||'15',10),maxPoints:parseInt(els.maxPoints.value||'288',10),autostart:els.autostart.checked,source:els.source.value,customUrl:els.customUrl.value});
+      saveSettings({intervalSecs:secs,timeout:parseInt(els.timeout.value||'15',10),maxPoints:parseInt(els.maxPoints.value||'288',10),autostart:els.autostart.checked,showLabels:els.showLabels.checked,source:els.source.value,customUrl:els.customUrl.value});
       setStatus('Scheduled • next in '+secs+'s','var(--ok)');
     }
 
@@ -180,7 +181,7 @@
       const pts=data.map(d=>{const x=40+(W-48)*((d.ts-minTs)/span), y=(H-32)-((d.mbps/maxY)*(H-32))+8; return {x,y,v:d.mbps}});
       const grad=ctx.createLinearGradient(0,0,0,H); grad.addColorStop(0,'rgba(124,58,237,.9)'); grad.addColorStop(1,'rgba(124,58,237,.25)'); ctx.lineWidth=2; ctx.strokeStyle=grad; ctx.beginPath(); pts.forEach((p,i)=>{if(i===0)ctx.moveTo(p.x,p.y); else ctx.lineTo(p.x,p.y)}); ctx.stroke();
       const fill=ctx.createLinearGradient(0,0,0,H); fill.addColorStop(0,'rgba(124,58,237,.18)'); fill.addColorStop(1,'rgba(124,58,237,0)'); ctx.fillStyle=fill; ctx.lineTo(pts[pts.length-1].x,H-16); ctx.lineTo(pts[0].x,H-16); ctx.closePath(); ctx.fill();
-      ctx.fillStyle='rgba(255,255,255,.9)'; ctx.font='12px system-ui'; ctx.textAlign='center'; ctx.textBaseline='bottom'; pts.forEach(p=>{ctx.beginPath(); ctx.arc(p.x,p.y,3,0,Math.PI*2); ctx.fill(); ctx.fillText(String(Math.round(p.v)), p.x, Math.max(12,p.y-6));});
+      ctx.fillStyle='rgba(255,255,255,.9)'; ctx.font='12px system-ui'; ctx.textAlign='center'; ctx.textBaseline='bottom'; pts.forEach(p=>{ctx.beginPath(); ctx.arc(p.x,p.y,3,0,Math.PI*2); ctx.fill(); if(els.showLabels && els.showLabels.checked) ctx.fillText(String(Math.round(p.v)), p.x, Math.max(12,p.y-6));});
     }
 
     function renderTable(){els.tbody.innerHTML=''; loadData().slice().reverse().forEach(addRow)}
@@ -189,9 +190,9 @@
 
     // events
     els.btnExport.addEventListener('click',exportCsv); els.btnClear.addEventListener('click',clearData);
-    ['intervalSecs','timeout','maxPoints','autostart'].forEach(id=>els[id].addEventListener('change',()=>{schedule(); updateStats()}));
-    els.source.addEventListener('change',()=>{els.customRow.style.display=els.source.value==='custom'?'block':'none'; saveSettings({intervalSecs:parseInt(els.intervalSecs.value||'300',10),timeout:parseInt(els.timeout.value||'15',10),maxPoints:parseInt(els.maxPoints.value||'288',10),autostart:els.autostart.checked,source:els.source.value,customUrl:els.customUrl.value})});
-    els.customUrl.addEventListener('input',()=>saveSettings({intervalSecs:parseInt(els.intervalSecs.value||'300',10),timeout:parseInt(els.timeout.value||'15',10),maxPoints:parseInt(els.maxPoints.value||'288',10),autostart:els.autostart.checked,source:els.source.value,customUrl:els.customUrl.value}));
+    ['intervalSecs','timeout','maxPoints','autostart','showLabels'].forEach(id=>els[id].addEventListener('change',()=>{if(id!=='showLabels') schedule(); updateStats()}));
+    els.source.addEventListener('change',()=>{els.customRow.style.display=els.source.value==='custom'?'block':'none'; saveSettings({intervalSecs:parseInt(els.intervalSecs.value||'300',10),timeout:parseInt(els.timeout.value||'15',10),maxPoints:parseInt(els.maxPoints.value||'288',10),autostart:els.autostart.checked,showLabels:els.showLabels.checked,source:els.source.value,customUrl:els.customUrl.value})});
+    els.customUrl.addEventListener('input',()=>saveSettings({intervalSecs:parseInt(els.intervalSecs.value||'300',10),timeout:parseInt(els.timeout.value||'15',10),maxPoints:parseInt(els.maxPoints.value||'288',10),autostart:els.autostart.checked,showLabels:els.showLabels.checked,source:els.source.value,customUrl:els.customUrl.value}));
 
     els.btnStart.addEventListener('click',()=>{
       if(els.btnStart.textContent === 'Start') {
@@ -218,7 +219,7 @@
 
     // boot
     (function init(){
-      const cfg=loadSettings(); if(cfg.intervalSecs)els.intervalSecs.value=cfg.intervalSecs; if(cfg.timeout)els.timeout.value=cfg.timeout; if(cfg.maxPoints)els.maxPoints.value=cfg.maxPoints; if(cfg.autostart)els.autostart.checked=cfg.autostart; if(cfg.source)els.source.value=cfg.source; if(cfg.customUrl)els.customUrl.value=cfg.customUrl; els.customRow.style.display=els.source.value==='custom'?'block':'none';
+      const cfg=loadSettings(); if(cfg.intervalSecs)els.intervalSecs.value=cfg.intervalSecs; if(cfg.timeout)els.timeout.value=cfg.timeout; if(cfg.maxPoints)els.maxPoints.value=cfg.maxPoints; if(cfg.autostart)els.autostart.checked=cfg.autostart; if(cfg.showLabels!==undefined)els.showLabels.checked=cfg.showLabels; if(cfg.source)els.source.value=cfg.source; if(cfg.customUrl)els.customUrl.value=cfg.customUrl; els.customRow.style.display=els.source.value==='custom'?'block':'none';
       renderTable(); updateStats(); setStatus('Idle','var(--warn)');
       if(els.autostart.checked){ els.btnStart.click(); }
     })();
