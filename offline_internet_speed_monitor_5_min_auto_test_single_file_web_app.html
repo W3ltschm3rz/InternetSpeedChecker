@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Internet Speed Monitor</title>
+  <style>
+    :root{--bg:#0f172a;--ink:#e5e7eb;--muted:#94a3b8;--panel:#111827;--accent:#7c3aed;--ok:#10b981;--warn:#f59e0b;--bad:#ef4444}
+    *{box-sizing:border-box}
+    body{margin:0;background:#0f172a;color:var(--ink);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif}
+    header{display:flex;justify-content:space-between;align-items:center;padding:16px}
+    h1{margin:0;font-size:22px}
+    .wrap{max-width:1100px;margin:0 auto}
+    .panel{margin:12px;padding:16px;border-radius:14px;background:#111827;border:1px solid rgba(255,255,255,.08)}
+    .top{display:grid;grid-template-columns:1fr 360px;gap:12px}
+    @media (max-width:950px){.top{grid-template-columns:1fr}}
+    canvas{display:block;width:100%;height:50vh;min-height:280px;background:#0b1022;border-radius:12px}
+    .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px}
+    .stat{padding:10px;border-radius:10px;background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.015));border:1px solid rgba(255,255,255,.06)}
+    .stat .val{font-size:26px;font-weight:800}
+    .controls label{display:grid;gap:6px;font-size:12px;color:var(--muted);margin-bottom:8px}
+    input,select{width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#0b1022;color:var(--ink)}
+    button{appearance:none;border:none;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer}
+    #btnStart{background:var(--accent);color:white}
+    #btnStop{background:transparent;color:var(--ink);border:1px solid rgba(255,255,255,.16)}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .hint{color:var(--muted);font-size:12px}
+    .dot{width:10px;height:10px;border-radius:999px;background:var(--warn)}
+    table{width:100%;border-collapse:collapse;margin-top:8px}
+    th,td{padding:8px 6px;border-bottom:1px dashed rgba(255,255,255,.08)}
+    .mini{display:flex;align-items:center;gap:8px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Internet Speed Monitor</h1>
+      <div class="row">
+        <button id="btnStart">Start</button>
+        <button id="btnStop" disabled>Stop</button>
+      </div>
+    </header>
+
+    <section class="top">
+      <div class="panel">
+        <canvas id="chart" aria-label="Speed chart" role="img"></canvas>
+        <div class="stats">
+          <div class="stat"><div class="hint">Latest</div><div class="val" id="statLatest">—</div></div>
+          <div class="stat"><div class="hint">24h Avg</div><div class="val" id="statAvg">—</div></div>
+          <div class="stat"><div class="hint">Best</div><div class="val" id="statMax">—</div></div>
+          <div class="stat"><div class="hint">Samples</div><div class="val" id="statCount">0</div></div>
+        </div>
+      </div>
+      <aside class="panel">
+        <div class="controls">
+          <label>Interval (seconds)
+            <input id="intervalSecs" type="number" min="1" step="1" value="300"/>
+          </label>
+          <label>Test Timeout (seconds)
+            <input id="timeout" type="number" min="5" step="1" value="15"/>
+          </label>
+          <label>Max data points (kept & plotted)
+            <input id="maxPoints" type="number" min="10" step="10" value="288"/>
+          </label>
+          <label class="mini"><input id="autostart" type="checkbox"/> Autostart on load</label>
+          <label>Test Source
+            <select id="source">
+              <option value="https://speed.cloudflare.com/__down?bytes=25000000">Cloudflare • 25MB (PH)</option>
+              <option value="https://speed.cloudflare.com/__down?bytes=10000000">Cloudflare • 10MB</option>
+              <option value="https://speed.cloudflare.com/__down?bytes=100000000">Cloudflare • 100MB</option>
+              <option value="https://mirror.pregi.net/test/10MB.test">PH Pregi Mirror • 10MB</option>
+              <option value="https://mirror.rise.ph/test/10MB.test">PH Rise Mirror • 10MB</option>
+              <option value="https://mirror.akt.ph/test/10MB.test">PH Akt Mirror • 10MB</option>
+              <option value="https://speed.hetzner.de/10MB.bin">Hetzner • 10MB</option>
+              <option value="https://speed.hetzner.de/100MB.bin">Hetzner • 100MB</option>
+              <option value="https://ipv4.download.thinkbroadband.com/10MB.zip">ThinkBroadband • 10MB</option>
+              <option value="custom">Custom URL…</option>
+            </select>
+          </label>
+          <label id="customRow" style="display:none">Custom URL
+            <input id="customUrl" type="text" placeholder="https://example.com/100MB.bin" />
+          </label>
+          <div class="row" style="margin-top:6px">
+            <button id="btnExport" style="background:transparent;border:1px solid rgba(255,255,255,.16);color:var(--ink)">Export CSV</button>
+            <button id="btnClear" style="background:transparent;border:1px solid rgba(255,255,255,.16);color:var(--ink)">Clear Data</button>
+          </div>
+          <p class="hint">Tip: Cloudflare endpoints work well in PH and include CORS. If you see CORS errors on other hosts, run this via a local server or switch sources.</p>
+          <div class="row" style="gap:10px;margin-top:6px">
+            <div class="dot" id="statusDot"></div>
+            <div id="statusText" class="hint">Idle</div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="panel" style="display:grid;grid-template-columns:1fr 340px;gap:12px">
+      <div>
+        <table id="table"><thead><tr><th style="width:220px">When</th><th>Mbps</th><th style="width:120px">MB</th><th style="width:100px">ms</th><th>Source</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div>
+        <div class="stat" style="height:100%">
+          <div class="hint" style="margin-bottom:6px">Diagnostics</div>
+          <div id="diag" style="font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; line-height:1.4; white-space:pre-wrap; color:#eab308; background:rgba(234,179,8,.08); border:1px dashed rgba(234,179,8,.4); padding:10px; border-radius:10px; min-height:88px">No issues yet. Click <strong>Start</strong> to verify connectivity.</div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const els={chart:document.getElementById('chart'),btnStart:document.getElementById('btnStart'),btnStop:document.getElementById('btnStop'),btnExport:document.getElementById('btnExport'),btnClear:document.getElementById('btnClear'),intervalSecs:document.getElementById('intervalSecs'),timeout:document.getElementById('timeout'),maxPoints:document.getElementById('maxPoints'),autostart:document.getElementById('autostart'),source:document.getElementById('source'),customRow:document.getElementById('customRow'),customUrl:document.getElementById('customUrl'),statusDot:document.getElementById('statusDot'),statusText:document.getElementById('statusText'),statLatest:document.getElementById('statLatest'),statAvg:document.getElementById('statAvg'),statMax:document.getElementById('statMax'),statCount:document.getElementById('statCount'),tbody:document.querySelector('#table tbody')};
+
+    const STORAGE_KEY='SPEED_DATA_V3';
+    const SETTINGS_KEY='SPEED_SETTINGS_V3';
+    let scheduleId=null, uiTickerId=null, nextAt=null, testing=false;
+
+    function loadSettings(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY))||{}}catch(e){return{}}}
+    function saveSettings(cfg){localStorage.setItem(SETTINGS_KEY,JSON.stringify(cfg))}
+    function loadData(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY))||[]}catch(e){return[]}}
+    function saveData(arr){localStorage.setItem(STORAGE_KEY,JSON.stringify(arr))}
+
+    function fmtTs(ts){return new Date(ts).toLocaleString()}
+    function getSourceUrl(){return els.source.value==='custom'?els.customUrl.value.trim():els.source.value}
+
+    function addRow(sample){const tr=document.createElement('tr'); tr.innerHTML=`<td>${fmtTs(sample.ts)}</td><td>${sample.mbps.toFixed(2)}</td><td>${(sample.bytes/1048576).toFixed(2)}</td><td>${sample.ms}</td><td class="hint" style="max-width:380px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${sample.src}">${sample.src}</td>`; els.tbody.prepend(tr)}
+
+    function trimToMaxPoints(){const maxP=Math.max(10,parseInt(els.maxPoints.value||'288',10)); const data=loadData(); while(data.length>maxP){data.shift()} saveData(data)}
+
+    function updateStats(){
+      trimToMaxPoints(); const data=loadData(); els.statCount.textContent=data.length;
+      if(!data.length){els.statLatest.textContent='—'; els.statAvg.textContent='—'; els.statMax.textContent='—'; drawChart([]); return}
+      els.statLatest.textContent=data[data.length-1].mbps.toFixed(2)+' Mbps';
+      els.statMax.textContent=data.reduce((m,x)=>Math.max(m,x.mbps),0).toFixed(2)+' Mbps';
+      const since=Date.now()-24*3600*1000; const last24=data.filter(x=>x.ts>=since); const arr=last24.length?last24:data; const avg=arr.reduce((s,x)=>s+x.mbps,0)/arr.length; els.statAvg.textContent=avg.toFixed(2)+' Mbps';
+      drawChart(data)
+    }
+
+    function setStatus(text,color){els.statusText.textContent=text; els.statusDot.style.background=color}
+
+    function schedule(){
+      const secs=Math.max(1,parseInt(els.intervalSecs.value||'300',10));
+      if(scheduleId) clearInterval(scheduleId);
+      scheduleId=setInterval(()=>{ if(!testing) runTest(); }, secs*1000);
+      nextAt=Date.now()+secs*1000;
+      saveSettings({intervalSecs:secs,timeout:parseInt(els.timeout.value||'15',10),maxPoints:parseInt(els.maxPoints.value||'288',10),autostart:els.autostart.checked,source:els.source.value,customUrl:els.customUrl.value});
+      setStatus('Scheduled • next in '+secs+'s','var(--ok)');
+    }
+
+    async function runTest(){
+      const srcBase=getSourceUrl(); if(!srcBase){alert('Set a valid test URL');return}
+      testing=true; setStatus('Testing…','var(--accent)'); els.btnStart.disabled=true; els.btnStop.disabled=true;
+      const timeoutMs=Math.max(5,parseInt(els.timeout.value||'15',10))*1000; const ctrl=new AbortController(); const id=setTimeout(()=>ctrl.abort('timeout'),timeoutMs);
+      const url=srcBase+(srcBase.includes('?')?'&':'?')+'cb='+(crypto.getRandomValues(new Uint32Array(1))[0]);
+      const t0=performance.now(); let bytes=0;
+      try{
+        const resp=await fetch(url,{cache:'no-store',mode:'cors',signal:ctrl.signal});
+        if(!resp.ok) throw new Error('HTTP '+resp.status);
+        if(!resp.body||typeof resp.body.getReader!=='function') throw new Error('CORS/opaque response');
+        const reader=resp.body.getReader(); while(true){const {done,value}=await reader.read(); if(done)break; bytes+=value.byteLength}
+        const ms=Math.max(1,performance.now()-t0); const mbps=(bytes*8)/(ms/1000)/1e6;
+        const sample={ts:Date.now(),mbps,bytes,ms:Math.round(ms),src:srcBase}; const data=loadData(); data.push(sample); saveData(data); addRow(sample); updateStats();
+        setStatus('Done • '+mbps.toFixed(2)+' Mbps','var(--ok)');
+        document.getElementById('diag').textContent = 'Last OK: '+mbps.toFixed(2)+' Mbps\n'+new Date().toLocaleString();
+      }catch(err){
+        const sample={ts:Date.now(),mbps:0,bytes,ms:Math.round(performance.now()-t0),src:srcBase,err:String(err)}; const data=loadData(); data.push(sample); saveData(data); addRow(sample); updateStats();
+        const msg='Failed: '+(err?.message||err?.name||'error'); setStatus(msg,'var(--bad)'); document.getElementById('diag').textContent = msg+'\nURL: '+srcBase+'\nTip: Use a Cloudflare source or open in Chrome/Edge (file:// origin can be blocked).'; console.error(err)
+      }finally{
+        clearTimeout(id); testing=false; els.btnStart.disabled=false; els.btnStop.disabled=false;
+        // set nextAt for countdown
+        const secs=Math.max(1,parseInt(els.intervalSecs.value||'300',10)); nextAt=Date.now()+secs*1000;
+      }
+    }
+
+    function drawChart(data){
+      const c=els.chart, ctx=c.getContext('2d'); const W=c.width=c.clientWidth, H=c.height=c.clientHeight; ctx.clearRect(0,0,W,H);
+      ctx.fillStyle='rgba(255,255,255,.03)'; ctx.fillRect(0,0,W,H);
+      if(!data.length){ctx.fillStyle='rgba(255,255,255,.6)'; ctx.font='14px system-ui'; ctx.fillText('No samples yet. Click "Start" to begin monitoring.',12,22); return}
+      const minTs=Math.min(...data.map(d=>d.ts)), maxTs=Math.max(...data.map(d=>d.ts)), span=maxTs-minTs||1; const maxY=Math.max(10,Math.ceil(Math.max(...data.map(d=>d.mbps))*1.15));
+      ctx.strokeStyle='rgba(255,255,255,.08)'; ctx.lineWidth=1; for(let y=0;y<=5;y++){const yy=H-(H-32)*(y/5)-16; ctx.beginPath(); ctx.moveTo(40,yy); ctx.lineTo(W-8,yy); ctx.stroke(); ctx.fillStyle='rgba(255,255,255,.55)'; ctx.font='12px system-ui'; ctx.fillText(Math.round(maxY*(y/5))+' Mbps',6,yy-2)}
+      const ticks=6; for(let i=0;i<=ticks;i++){const ts=minTs+span*(i/ticks); const x=40+(W-48)*((ts-minTs)/span); const dt=new Date(ts); ctx.fillStyle='rgba(255,255,255,.55)'; ctx.font='12px system-ui'; ctx.fillText(dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}), x-18, H-6)}
+      const pts=data.map(d=>{const x=40+(W-48)*((d.ts-minTs)/span), y=(H-32)-((d.mbps/maxY)*(H-32))+8; return {x,y,v:d.mbps}});
+      const grad=ctx.createLinearGradient(0,0,0,H); grad.addColorStop(0,'rgba(124,58,237,.9)'); grad.addColorStop(1,'rgba(124,58,237,.25)'); ctx.lineWidth=2; ctx.strokeStyle=grad; ctx.beginPath(); pts.forEach((p,i)=>{if(i===0)ctx.moveTo(p.x,p.y); else ctx.lineTo(p.x,p.y)}); ctx.stroke();
+      const fill=ctx.createLinearGradient(0,0,0,H); fill.addColorStop(0,'rgba(124,58,237,.18)'); fill.addColorStop(1,'rgba(124,58,237,0)'); ctx.fillStyle=fill; ctx.lineTo(pts[pts.length-1].x,H-16); ctx.lineTo(pts[0].x,H-16); ctx.closePath(); ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.9)'; ctx.font='12px system-ui'; ctx.textAlign='center'; ctx.textBaseline='bottom'; pts.forEach(p=>{ctx.beginPath(); ctx.arc(p.x,p.y,3,0,Math.PI*2); ctx.fill(); ctx.fillText(String(Math.round(p.v)), p.x, Math.max(12,p.y-6));});
+    }
+
+    function renderTable(){els.tbody.innerHTML=''; loadData().slice().reverse().forEach(addRow)}
+    function exportCsv(){const data=loadData(); const rows=[["timestamp","iso","mbps","bytes","ms","source","error"]]; for(const d of data){rows.push([d.ts,new Date(d.ts).toISOString(),d.mbps.toFixed(4),d.bytes,d.ms,'"'+(d.src||'')+'"','"'+(d.err||'')+'"'])} const csv=rows.map(r=>r.join(',')).join('\n'); const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=Object.assign(document.createElement('a'),{href:url,download:'speed-data.csv'}); document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)}
+    function clearData(){if(confirm('Clear all saved results?')){saveData([]); renderTable(); updateStats()}}
+
+    // events
+    els.btnExport.addEventListener('click',exportCsv); els.btnClear.addEventListener('click',clearData);
+    ['intervalSecs','timeout','maxPoints','autostart'].forEach(id=>els[id].addEventListener('change',()=>{schedule(); updateStats()}));
+    els.source.addEventListener('change',()=>{els.customRow.style.display=els.source.value==='custom'?'block':'none'; saveSettings({intervalSecs:parseInt(els.intervalSecs.value||'300',10),timeout:parseInt(els.timeout.value||'15',10),maxPoints:parseInt(els.maxPoints.value||'288',10),autostart:els.autostart.checked,source:els.source.value,customUrl:els.customUrl.value})});
+    els.customUrl.addEventListener('input',()=>saveSettings({intervalSecs:parseInt(els.intervalSecs.value||'300',10),timeout:parseInt(els.timeout.value||'15',10),maxPoints:parseInt(els.maxPoints.value||'288',10),autostart:els.autostart.checked,source:els.source.value,customUrl:els.customUrl.value}));
+
+    els.btnStart.addEventListener('click',()=>{
+      if(els.btnStart.textContent === 'Start') {
+        schedule(); 
+        runTest(); 
+        els.btnStart.disabled=true; 
+        els.btnStop.disabled=false; 
+        els.btnStart.textContent='Running';
+      } else {
+        // If already running, just run a single test
+        runTest();
+      }
+    });
+    els.btnStop.addEventListener('click',()=>{if(scheduleId)clearInterval(scheduleId); scheduleId=null; els.btnStart.disabled=false; els.btnStop.disabled=true; els.btnStart.textContent='Start'; setStatus('Stopped','var(--warn)')});
+
+    // UI ticker for countdown + responsive redraw
+    uiTickerId=setInterval(()=>{
+      const secs=Math.max(1,parseInt(els.intervalSecs.value||'300',10));
+      if(nextAt && !testing){ const left=Math.max(0,Math.round((nextAt-Date.now())/1000)); setStatus('Scheduled • next in '+left+'s','var(--ok)'); }
+      drawChart(loadData());
+    }, 1000);
+
+    window.addEventListener('resize',()=>drawChart(loadData()));
+
+    // boot
+    (function init(){
+      const cfg=loadSettings(); if(cfg.intervalSecs)els.intervalSecs.value=cfg.intervalSecs; if(cfg.timeout)els.timeout.value=cfg.timeout; if(cfg.maxPoints)els.maxPoints.value=cfg.maxPoints; if(cfg.autostart)els.autostart.checked=cfg.autostart; if(cfg.source)els.source.value=cfg.source; if(cfg.customUrl)els.customUrl.value=cfg.customUrl; els.customRow.style.display=els.source.value==='custom'?'block':'none';
+      renderTable(); updateStats(); setStatus('Idle','var(--warn)');
+      if(els.autostart.checked){ els.btnStart.click(); }
+    })();
+  </script>
+</body>
+</html>
