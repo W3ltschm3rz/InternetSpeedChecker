@@ -184,7 +184,7 @@
       ctx.fillStyle='rgba(255,255,255,.9)'; ctx.font='12px system-ui'; ctx.textAlign='center'; ctx.textBaseline='bottom'; pts.forEach(p=>{ctx.beginPath(); ctx.arc(p.x,p.y,3,0,Math.PI*2); ctx.fill(); if(els.showLabels && els.showLabels.checked) ctx.fillText(String(Math.round(p.v)), p.x, Math.max(12,p.y-6));});
     }
 
-    function renderTable(){els.tbody.innerHTML=''; loadData().slice().reverse().forEach(addRow)}
+    function renderTable(){els.tbody.innerHTML=''; const data=loadData(); const maxP=Math.max(10,parseInt(els.maxPoints.value||'288',10)); data.slice(-maxP).reverse().forEach(addRow)}
     function exportCsv(){const data=loadData(); const rows=[["timestamp","iso","mbps","bytes","ms","source","error"]]; for(const d of data){rows.push([d.ts,new Date(d.ts).toISOString(),d.mbps.toFixed(4),d.bytes,d.ms,'"'+(d.src||'')+'"','"'+(d.err||'')+'"'])} const csv=rows.map(r=>r.join(',')).join('\n'); const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=Object.assign(document.createElement('a'),{href:url,download:'speed-data.csv'}); document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)}
     function clearData(){if(confirm('Clear all saved results?')){saveData([]); renderTable(); updateStats()}}
 
