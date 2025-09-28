@@ -66,6 +66,7 @@
           <label class="mini"><input id="autostart" type="checkbox"/> Autostart on load</label>
           <label>Test Source
             <select id="source">
+              <option value="fast.com">Fast.com • Netflix Speed Test</option>
               <option value="https://speed.cloudflare.com/__down?bytes=25000000">Cloudflare • 25MB (PH)</option>
               <option value="https://speed.cloudflare.com/__down?bytes=10000000">Cloudflare • 10MB</option>
               <option value="https://speed.cloudflare.com/__down?bytes=100000000">Cloudflare • 100MB</option>
@@ -81,11 +82,18 @@
           <label id="customRow" style="display:none">Custom URL
             <input id="customUrl" type="text" placeholder="https://example.com/100MB.bin" />
           </label>
+          <label id="fastTokenRow" style="display:none">Fast.com Token
+            <div class="row" style="gap:8px;margin-bottom:4px">
+              <input id="fastToken" type="text" placeholder="Enter your fast.com token" style="flex:1" />
+              <button id="btnFetchToken" style="background:var(--accent);color:white;padding:8px 12px;font-size:12px">Auto Fetch</button>
+            </div>
+            <div class="hint">Get token from fast.com → DevTools → Network → Copy token from API request, or click "Auto Fetch"</div>
+          </label>
           <div class="row" style="margin-top:6px">
             <button id="btnExport" style="background:transparent;border:1px solid rgba(255,255,255,.16);color:var(--ink)">Export CSV</button>
             <button id="btnClear" style="background:transparent;border:1px solid rgba(255,255,255,.16);color:var(--ink)">Clear Data</button>
           </div>
-          <p class="hint">Tip: Cloudflare endpoints work well in PH and include CORS. If you see CORS errors on other hosts, run this via a local server or switch sources.</p>
+          <p class="hint">Tip: Fast.com provides Netflix's speed test. Cloudflare endpoints work well in PH and include CORS. If you see CORS errors on other hosts, run this via a local server or switch sources.</p>
           <div class="row" style="gap:10px;margin-top:6px">
             <div class="dot" id="statusDot"></div>
             <div id="statusText" class="hint">Idle</div>
@@ -108,7 +116,7 @@
   </div>
 
   <script>
-    const els={chart:document.getElementById('chart'),btnStart:document.getElementById('btnStart'),btnStop:document.getElementById('btnStop'),btnExport:document.getElementById('btnExport'),btnClear:document.getElementById('btnClear'),intervalSecs:document.getElementById('intervalSecs'),timeout:document.getElementById('timeout'),maxPoints:document.getElementById('maxPoints'),autostart:document.getElementById('autostart'),showLabels:document.getElementById('showLabels'),source:document.getElementById('source'),customRow:document.getElementById('customRow'),customUrl:document.getElementById('customUrl'),statusDot:document.getElementById('statusDot'),statusText:document.getElementById('statusText'),statLatest:document.getElementById('statLatest'),statAvg:document.getElementById('statAvg'),statMax:document.getElementById('statMax'),statCount:document.getElementById('statCount'),tbody:document.querySelector('#table tbody')};
+    const els={chart:document.getElementById('chart'),btnStart:document.getElementById('btnStart'),btnStop:document.getElementById('btnStop'),btnExport:document.getElementById('btnExport'),btnClear:document.getElementById('btnClear'),btnFetchToken:document.getElementById('btnFetchToken'),intervalSecs:document.getElementById('intervalSecs'),timeout:document.getElementById('timeout'),maxPoints:document.getElementById('maxPoints'),autostart:document.getElementById('autostart'),showLabels:document.getElementById('showLabels'),source:document.getElementById('source'),customRow:document.getElementById('customRow'),customUrl:document.getElementById('customUrl'),fastTokenRow:document.getElementById('fastTokenRow'),fastToken:document.getElementById('fastToken'),statusDot:document.getElementById('statusDot'),statusText:document.getElementById('statusText'),statLatest:document.getElementById('statLatest'),statAvg:document.getElementById('statAvg'),statMax:document.getElementById('statMax'),statCount:document.getElementById('statCount'),tbody:document.querySelector('#table tbody')};
 
     const STORAGE_KEY='SPEED_DATA_V3';
     const SETTINGS_KEY='SPEED_SETTINGS_V3';
@@ -121,6 +129,97 @@
 
     function fmtTs(ts){return new Date(ts).toLocaleString()}
     function getSourceUrl(){return els.source.value==='custom'?els.customUrl.value.trim():els.source.value}
+    
+    async function runFastSpeedTest(token) {
+      if (!token) throw new Error('Fast.com token is required');
+      
+      const timeoutMs = Math.max(5, parseInt(els.timeout.value || '15', 10)) * 1000;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort('timeout'), timeoutMs);
+      
+      try {
+        // Get speed test URLs from fast.com API
+        const configUrl = `https://api.fast.com/netflix/speedtest?https=true&token=${token}&urlCount=5`;
+        const configResponse = await fetch(configUrl, { 
+          signal: controller.signal,
+          cache: 'no-store'
+        });
+        
+        if (!configResponse.ok) {
+          throw new Error(`Fast.com config API error: ${configResponse.status}`);
+        }
+        
+        const config = await configResponse.json();
+        console.log('Fast.com API response:', config);
+        
+        // Handle both possible response formats
+        let urls = [];
+        if (Array.isArray(config)) {
+          // Direct array format
+          urls = config;
+        } else if (config.value && Array.isArray(config.value)) {
+          // Wrapped format
+          urls = config.value;
+        } else {
+          console.error('Invalid config structure:', config);
+          throw new Error('Invalid response from fast.com API - check console for details');
+        }
+        
+        // Test each URL and calculate average speed
+        const speeds = [];
+        const t0 = performance.now();
+        
+        for (const urlObj of urls.slice(0, 3)) { // Test first 3 URLs
+          const url = urlObj.url;
+          try {
+            const testStart = performance.now();
+            const response = await fetch(url, {
+              signal: controller.signal,
+              cache: 'no-store',
+              mode: 'cors'
+            });
+            
+            if (!response.ok) continue;
+            
+            const reader = response.body.getReader();
+            let bytes = 0;
+            
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              bytes += value.byteLength;
+            }
+            
+            const testTime = performance.now() - testStart;
+            const speedMbps = (bytes * 8) / (testTime / 1000) / 1e6;
+            speeds.push(speedMbps);
+            
+          } catch (err) {
+            console.warn('Failed to test URL:', url, err);
+          }
+        }
+        
+        clearTimeout(timeoutId);
+        
+        if (speeds.length === 0) {
+          throw new Error('All fast.com test URLs failed');
+        }
+        
+        // Return average speed
+        const avgSpeed = speeds.reduce((sum, speed) => sum + speed, 0) / speeds.length;
+        const totalTime = performance.now() - t0;
+        
+        return {
+          mbps: avgSpeed,
+          bytes: Math.round((avgSpeed * totalTime / 1000 * 1e6) / 8), // Estimate bytes
+          ms: Math.round(totalTime)
+        };
+        
+      } catch (err) {
+        clearTimeout(timeoutId);
+        throw err;
+      }
+    }
 
     function addRow(sample){const tr=document.createElement('tr'); tr.innerHTML=`<td>${fmtTs(sample.ts)}</td><td>${sample.mbps.toFixed(2)}</td><td>${(sample.bytes/1048576).toFixed(2)}</td><td>${sample.ms}</td><td class="hint" style="max-width:380px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${sample.src}">${sample.src}</td>`; els.tbody.prepend(tr)}
 
@@ -136,36 +235,129 @@
     }
 
     function setStatus(text,color){els.statusText.textContent=text; els.statusDot.style.background=color}
+    
+    async function fetchFastToken() {
+      try {
+        setStatus('Fetching token from fast.com...', 'var(--accent)');
+        els.btnFetchToken.disabled = true;
+        els.btnFetchToken.textContent = 'Fetching...';
+        
+        // Fetch the fast.com page
+        const response = await fetch('https://fast.com', {
+          mode: 'cors',
+          cache: 'no-store'
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const html = await response.text();
+        
+        // Look for the token in the HTML - try multiple patterns
+        let tokenMatch = html.match(/token["\s]*[:=]["\s]*["']?([A-Za-z0-9+/=]+)["']?/i);
+        if (!tokenMatch) {
+          // Try alternative patterns
+          tokenMatch = html.match(/["']([A-Za-z0-9+/=]{20,})["']/);
+        }
+        if (!tokenMatch) {
+          // Try to find any base64-like string that could be a token
+          tokenMatch = html.match(/([A-Za-z0-9+/=]{20,})/);
+        }
+        
+        if (tokenMatch && tokenMatch[1]) {
+          const token = tokenMatch[1];
+          els.fastToken.value = token;
+          saveSettings({
+            intervalSecs: parseInt(els.intervalSecs.value || '300', 10),
+            timeout: parseInt(els.timeout.value || '15', 10),
+            maxPoints: parseInt(els.maxPoints.value || '288', 10),
+            autostart: els.autostart.checked,
+            showLabels: els.showLabels.checked,
+            source: els.source.value,
+            customUrl: els.customUrl.value,
+            fastToken: token
+          });
+          
+          setStatus('Token fetched successfully!', 'var(--ok)');
+          document.getElementById('diag').textContent = 'Token auto-fetched: ' + token.substring(0, 20) + '...\n' + new Date().toLocaleString();
+        } else {
+          throw new Error('Token not found in fast.com response');
+        }
+        
+      } catch (err) {
+        setStatus('Failed to fetch token: ' + err.message, 'var(--bad)');
+        document.getElementById('diag').textContent = 'Auto-fetch failed: ' + err.message + '\nTip: Try manually getting token from fast.com DevTools';
+        console.error('Token fetch error:', err);
+      } finally {
+        els.btnFetchToken.disabled = false;
+        els.btnFetchToken.textContent = 'Auto Fetch';
+      }
+    }
 
     function schedule(){
       const secs=Math.max(1,parseInt(els.intervalSecs.value||'300',10));
       if(scheduleId) clearInterval(scheduleId);
       scheduleId=setInterval(()=>{ if(!testing) runTest(); }, secs*1000);
       nextAt=Date.now()+secs*1000;
-      saveSettings({intervalSecs:secs,timeout:parseInt(els.timeout.value||'15',10),maxPoints:parseInt(els.maxPoints.value||'288',10),autostart:els.autostart.checked,showLabels:els.showLabels.checked,source:els.source.value,customUrl:els.customUrl.value});
+      saveSettings({intervalSecs:secs,timeout:parseInt(els.timeout.value||'15',10),maxPoints:parseInt(els.maxPoints.value||'288',10),autostart:els.autostart.checked,showLabels:els.showLabels.checked,source:els.source.value,customUrl:els.customUrl.value,fastToken:els.fastToken.value});
       setStatus('Scheduled • next in '+secs+'s','var(--ok)');
     }
 
     async function runTest(){
-      const srcBase=getSourceUrl(); if(!srcBase){alert('Set a valid test URL');return}
+      const srcBase=getSourceUrl(); 
+      if(!srcBase){alert('Set a valid test URL');return}
+      
+      // Check for fast.com token requirement
+      if(srcBase === 'fast.com' && !els.fastToken.value.trim()){
+        alert('Fast.com token is required. Please enter your token or select a different test source.');
+        return;
+      }
+      
       testing=true; setStatus('Testing…','var(--accent)'); els.btnStart.disabled=true; els.btnStop.disabled=true;
-      const timeoutMs=Math.max(5,parseInt(els.timeout.value||'15',10))*1000; const ctrl=new AbortController(); const id=setTimeout(()=>ctrl.abort('timeout'),timeoutMs);
-      const url=srcBase+(srcBase.includes('?')?'&':'?')+'cb='+(crypto.getRandomValues(new Uint32Array(1))[0]);
-      const t0=performance.now(); let bytes=0;
+      
       try{
-        const resp=await fetch(url,{cache:'no-store',mode:'cors',signal:ctrl.signal});
-        if(!resp.ok) throw new Error('HTTP '+resp.status);
-        if(!resp.body||typeof resp.body.getReader!=='function') throw new Error('CORS/opaque response');
-        const reader=resp.body.getReader(); while(true){const {done,value}=await reader.read(); if(done)break; bytes+=value.byteLength}
-        const ms=Math.max(1,performance.now()-t0); const mbps=(bytes*8)/(ms/1000)/1e6;
-        const sample={ts:Date.now(),mbps,bytes,ms:Math.round(ms),src:srcBase}; const data=loadData(); data.push(sample); saveData(data); addRow(sample); updateStats();
-        setStatus('Done • '+mbps.toFixed(2)+' Mbps','var(--ok)');
-        document.getElementById('diag').textContent = 'Last OK: '+mbps.toFixed(2)+' Mbps\n'+new Date().toLocaleString();
+        let result;
+        
+        if(srcBase === 'fast.com') {
+          // Use fast.com API
+          result = await runFastSpeedTest(els.fastToken.value.trim());
+          result.src = 'fast.com';
+        } else {
+          // Use traditional download test
+          const timeoutMs=Math.max(5,parseInt(els.timeout.value||'15',10))*1000; 
+          const ctrl=new AbortController(); 
+          const id=setTimeout(()=>ctrl.abort('timeout'),timeoutMs);
+          const url=srcBase+(srcBase.includes('?')?'&':'?')+'cb='+(crypto.getRandomValues(new Uint32Array(1))[0]);
+          const t0=performance.now(); 
+          let bytes=0;
+          
+          const resp=await fetch(url,{cache:'no-store',mode:'cors',signal:ctrl.signal});
+          if(!resp.ok) throw new Error('HTTP '+resp.status);
+          if(!resp.body||typeof resp.body.getReader!=='function') throw new Error('CORS/opaque response');
+          const reader=resp.body.getReader(); 
+          while(true){const {done,value}=await reader.read(); if(done)break; bytes+=value.byteLength}
+          const ms=Math.max(1,performance.now()-t0); 
+          const mbps=(bytes*8)/(ms/1000)/1e6;
+          
+          result = {mbps, bytes, ms: Math.round(ms), src: srcBase};
+          clearTimeout(id);
+        }
+        
+        const sample={ts:Date.now(),mbps:result.mbps,bytes:result.bytes,ms:result.ms,src:result.src}; 
+        const data=loadData(); data.push(sample); saveData(data); addRow(sample); updateStats();
+        setStatus('Done • '+result.mbps.toFixed(2)+' Mbps','var(--ok)');
+        document.getElementById('diag').textContent = 'Last OK: '+result.mbps.toFixed(2)+' Mbps\n'+new Date().toLocaleString();
+        
       }catch(err){
-        const sample={ts:Date.now(),mbps:0,bytes,ms:Math.round(performance.now()-t0),src:srcBase,err:String(err)}; const data=loadData(); data.push(sample); saveData(data); addRow(sample); updateStats();
-        const msg='Failed: '+(err?.message||err?.name||'error'); setStatus(msg,'var(--bad)'); document.getElementById('diag').textContent = msg+'\nURL: '+srcBase+'\nTip: Use a Cloudflare source or open in Chrome/Edge (file:// origin can be blocked).'; console.error(err)
+        const sample={ts:Date.now(),mbps:0,bytes:0,ms:Math.round(performance.now()-performance.now()),src:srcBase,err:String(err)}; 
+        const data=loadData(); data.push(sample); saveData(data); addRow(sample); updateStats();
+        const msg='Failed: '+(err?.message||err?.name||'error'); 
+        setStatus(msg,'var(--bad)'); 
+        document.getElementById('diag').textContent = msg+'\nSource: '+srcBase+'\nTip: For fast.com, ensure token is valid. For other sources, use Cloudflare or run via local server.'; 
+        console.error(err)
       }finally{
-        clearTimeout(id); testing=false; els.btnStart.disabled=false; els.btnStop.disabled=false;
+        testing=false; els.btnStart.disabled=false; els.btnStop.disabled=false;
         // set nextAt for countdown
         const secs=Math.max(1,parseInt(els.intervalSecs.value||'300',10)); nextAt=Date.now()+secs*1000;
       }
@@ -190,9 +382,15 @@
 
     // events
     els.btnExport.addEventListener('click',exportCsv); els.btnClear.addEventListener('click',clearData);
+    els.btnFetchToken.addEventListener('click',fetchFastToken);
     ['intervalSecs','timeout','maxPoints','autostart','showLabels'].forEach(id=>els[id].addEventListener('change',()=>{if(id!=='showLabels') schedule(); updateStats()}));
-    els.source.addEventListener('change',()=>{els.customRow.style.display=els.source.value==='custom'?'block':'none'; saveSettings({intervalSecs:parseInt(els.intervalSecs.value||'300',10),timeout:parseInt(els.timeout.value||'15',10),maxPoints:parseInt(els.maxPoints.value||'288',10),autostart:els.autostart.checked,showLabels:els.showLabels.checked,source:els.source.value,customUrl:els.customUrl.value})});
-    els.customUrl.addEventListener('input',()=>saveSettings({intervalSecs:parseInt(els.intervalSecs.value||'300',10),timeout:parseInt(els.timeout.value||'15',10),maxPoints:parseInt(els.maxPoints.value||'288',10),autostart:els.autostart.checked,showLabels:els.showLabels.checked,source:els.source.value,customUrl:els.customUrl.value}));
+    els.source.addEventListener('change',()=>{
+      els.customRow.style.display=els.source.value==='custom'?'block':'none';
+      els.fastTokenRow.style.display=els.source.value==='fast.com'?'block':'none';
+      saveSettings({intervalSecs:parseInt(els.intervalSecs.value||'300',10),timeout:parseInt(els.timeout.value||'15',10),maxPoints:parseInt(els.maxPoints.value||'288',10),autostart:els.autostart.checked,showLabels:els.showLabels.checked,source:els.source.value,customUrl:els.customUrl.value,fastToken:els.fastToken.value});
+    });
+    els.customUrl.addEventListener('input',()=>saveSettings({intervalSecs:parseInt(els.intervalSecs.value||'300',10),timeout:parseInt(els.timeout.value||'15',10),maxPoints:parseInt(els.maxPoints.value||'288',10),autostart:els.autostart.checked,showLabels:els.showLabels.checked,source:els.source.value,customUrl:els.customUrl.value,fastToken:els.fastToken.value}));
+    els.fastToken.addEventListener('input',()=>saveSettings({intervalSecs:parseInt(els.intervalSecs.value||'300',10),timeout:parseInt(els.timeout.value||'15',10),maxPoints:parseInt(els.maxPoints.value||'288',10),autostart:els.autostart.checked,showLabels:els.showLabels.checked,source:els.source.value,customUrl:els.customUrl.value,fastToken:els.fastToken.value}));
 
     els.btnStart.addEventListener('click',()=>{
       if(els.btnStart.textContent === 'Start') {
@@ -219,7 +417,7 @@
 
     // boot
     (function init(){
-      const cfg=loadSettings(); if(cfg.intervalSecs)els.intervalSecs.value=cfg.intervalSecs; if(cfg.timeout)els.timeout.value=cfg.timeout; if(cfg.maxPoints)els.maxPoints.value=cfg.maxPoints; if(cfg.autostart)els.autostart.checked=cfg.autostart; if(cfg.showLabels!==undefined)els.showLabels.checked=cfg.showLabels; if(cfg.source)els.source.value=cfg.source; if(cfg.customUrl)els.customUrl.value=cfg.customUrl; els.customRow.style.display=els.source.value==='custom'?'block':'none';
+      const cfg=loadSettings(); if(cfg.intervalSecs)els.intervalSecs.value=cfg.intervalSecs; if(cfg.timeout)els.timeout.value=cfg.timeout; if(cfg.maxPoints)els.maxPoints.value=cfg.maxPoints; if(cfg.autostart)els.autostart.checked=cfg.autostart; if(cfg.showLabels!==undefined)els.showLabels.checked=cfg.showLabels; if(cfg.source)els.source.value=cfg.source; if(cfg.customUrl)els.customUrl.value=cfg.customUrl; if(cfg.fastToken)els.fastToken.value=cfg.fastToken; els.customRow.style.display=els.source.value==='custom'?'block':'none'; els.fastTokenRow.style.display=els.source.value==='fast.com'?'block':'none';
       renderTable(); updateStats(); setStatus('Idle','var(--warn)');
       if(els.autostart.checked){ els.btnStart.click(); }
     })();
