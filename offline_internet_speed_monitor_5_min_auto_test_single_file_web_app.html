@@ -378,7 +378,38 @@
 
     function renderTable(){els.tbody.innerHTML=''; const data=loadData(); const maxP=Math.max(10,parseInt(els.maxPoints.value||'288',10)); data.slice(-maxP).reverse().forEach(addRow)}
     function exportCsv(){const data=loadData(); const rows=[["timestamp","iso","mbps","bytes","ms","source","error"]]; for(const d of data){rows.push([d.ts,new Date(d.ts).toISOString(),d.mbps.toFixed(4),d.bytes,d.ms,'"'+(d.src||'')+'"','"'+(d.err||'')+'"'])} const csv=rows.map(r=>r.join(',')).join('\n'); const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=Object.assign(document.createElement('a'),{href:url,download:'speed-data.csv'}); document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)}
-    function clearData(){if(confirm('Clear all saved results?')){saveData([]); renderTable(); updateStats()}}
+    function clearData(){if(confirm('Clear all saved results?')){resetSession({reason:'Cleared saved results'});}}
+    function resetSession(opts={}){
+      const autorun=opts.autorun===true;
+      const reason=opts.reason||'Cleared cached results';
+      if(scheduleId){clearInterval(scheduleId); scheduleId=null;}
+      testing=false;
+      nextAt=null;
+      saveData([]);
+      renderTable();
+      updateStats();
+      setStatus(reason,'var(--warn)');
+      els.btnStart.disabled=false;
+      els.btnStop.disabled=true;
+      els.btnStart.textContent='Start';
+      if(!autorun){return;}
+      const triggerStart=()=>requestAnimationFrame(()=>els.btnStart.click());
+      if(els.source.value==='fast.com' && !(els.fastToken.value||'').trim()){
+        setStatus('Waiting for fast.com token...','var(--warn)');
+        fetchFastToken().then(()=>{
+          if((els.fastToken.value||'').trim()){
+            triggerStart();
+          }else{
+            setStatus('Autostart skipped: fast.com token missing','var(--bad)');
+          }
+        }).catch(err=>{
+          console.error('Auto fetch token failed:', err);
+          setStatus('Autostart skipped: fast.com token missing','var(--bad)');
+        });
+        return;
+      }
+      triggerStart();
+    }
 
     // events
     els.btnExport.addEventListener('click',exportCsv); els.btnClear.addEventListener('click',clearData);
@@ -414,12 +445,18 @@
     }, 1000);
 
     window.addEventListener('resize',()=>drawChart(loadData()));
+    window.addEventListener('pageshow',ev=>{
+      if(ev.persisted){
+        resetSession({autorun:els.autostart.checked, reason:'Restored cached session'});
+      }
+    });
 
     // boot
     (function init(){
-      const cfg=loadSettings(); if(cfg.intervalSecs)els.intervalSecs.value=cfg.intervalSecs; if(cfg.timeout)els.timeout.value=cfg.timeout; if(cfg.maxPoints)els.maxPoints.value=cfg.maxPoints; if(cfg.autostart)els.autostart.checked=cfg.autostart; if(cfg.showLabels!==undefined)els.showLabels.checked=cfg.showLabels; if(cfg.source)els.source.value=cfg.source; if(cfg.customUrl)els.customUrl.value=cfg.customUrl; if(cfg.fastToken)els.fastToken.value=cfg.fastToken; els.customRow.style.display=els.source.value==='custom'?'block':'none'; els.fastTokenRow.style.display=els.source.value==='fast.com'?'block':'none';
-      renderTable(); updateStats(); setStatus('Idle','var(--warn)');
-      if(els.autostart.checked){ els.btnStart.click(); }
+      const cfg=loadSettings(); if(cfg.intervalSecs)els.intervalSecs.value=cfg.intervalSecs; if(cfg.timeout)els.timeout.value=cfg.timeout; if(cfg.maxPoints)els.maxPoints.value=cfg.maxPoints; if(cfg.autostart)els.autostart.checked=cfg.autostart; if(cfg.showLabels!==undefined)els.showLabels.checked=cfg.showLabels; if(cfg.source)els.source.value=cfg.source; if(cfg.customUrl)els.customUrl.value=cfg.customUrl; if(cfg.fastToken)els.fastToken.value=cfg.fastToken;
+      els.customRow.style.display=els.source.value==='custom'?'block':'none';
+      els.fastTokenRow.style.display=els.source.value==='fast.com'?'block':'none';
+      resetSession({autorun:els.autostart.checked, reason:'Cleared cached results'});
     })();
   </script>
 </body>
